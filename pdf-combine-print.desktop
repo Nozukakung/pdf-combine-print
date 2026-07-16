@@ -1,0 +1,11 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=PDF Combine & Print
+Comment=รวม PDF หลายหน้าแล้วปริ้น 4 หน้า/แผ่น A4
+Exec=/usr/bin/python3.12 /home/jakkrit/combine_pdfs_gui.py
+Icon=/home/jakkrit/.local/share/icons/pdf-combine-print.png
+Terminal=false
+Categories=Utility;Office;
+Keywords=pdf;print;combine;a4;
+StartupNotify=true
