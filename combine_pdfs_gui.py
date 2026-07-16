@@ -5,6 +5,7 @@ GUI สำหรับลูกพี่ ใช้ Tkinter เลือกไฟ
 """
 import os
 import sys
+import json
 import glob
 import shutil
 import subprocess
@@ -23,6 +24,43 @@ HALF_W = A4_W / 2
 HALF_H = A4_H / 2
 MARGIN = 8
 
+CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.json")
+
+# Catppuccin Mocha palette
+BG = "#1e1e2e"
+SURFACE0 = "#313244"
+SURFACE1 = "#45475a"
+TEXT = "#cdd6f4"
+SUBTEXT = "#a6adc8"
+PRIMARY = "#89b4fa"
+GREEN = "#a6e3a1"
+RED = "#f38ba8"
+PINK = "#f5c2e7"
+PEACH = "#fab387"
+BLUE = "#89b4fa"
+LAVENDER = "#b4befe"
+MAUVE = "#cba6f7"
+TEAL = "#94e2d5"
+YELLOW = "#f9e2af"
+SKY = "#89dceb"
+
+def load_config():
+    config = {"last_directory": os.path.expanduser("~/Downloads")}
+    try:
+        if os.path.exists(CONFIG_PATH):
+            with open(CONFIG_PATH, "r", encoding="utf-8") as f:
+                config.update(json.load(f))
+    except Exception:
+        pass
+    return config
+
+def save_config(config):
+    try:
+        with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+    except Exception:
+        pass
+
 def _detect_printer():
     """ตรวจหาเครื่องพิมพ์ที่ต่อกับเครื่องอัตโนมัติ"""
     try:
@@ -36,6 +74,7 @@ def _detect_printer():
     return None
 
 PRINTER = _detect_printer()
+CONFIG = load_config()
 
 class PreviewWindow:
     """หน้าต่างพรีวิวก่อนปริ้น — แสดงทุกหน้าที่รวมแล้ว"""
@@ -50,7 +89,7 @@ class PreviewWindow:
         self.win = tk.Toplevel(parent)
         self.win.title(f"👁 พรีวิว — {total_pages} หน้า / {sheets} แผ่น A4")
         self.win.geometry("900x700")
-        self.win.configure(bg="#1e1e2e")
+        self.win.configure(bg=BG)
         self.win.transient(parent)
         self.win.grab_set()
 
@@ -59,31 +98,33 @@ class PreviewWindow:
 
     def _build_ui(self):
         style = ttk.Style()
+        style.theme_use("clam")
         style.configure("PreviewTitle.TLabel", font=("Segoe UI", 14, "bold"),
-                        foreground="#cdd6f4", background="#1e1e2e")
+                        foreground=TEXT, background=BG)
         style.configure("PreviewInfo.TLabel", font=("Segoe UI", 10),
-                        foreground="#a6adc8", background="#1e1e2e")
+                        foreground=SUBTEXT, background=BG)
         style.configure("PreviewPrint.TButton", font=("Segoe UI", 12, "bold"),
-                        foreground="#1e1e2e", background="#a6e3a1")
+                        foreground="#1e1e2e", background=GREEN)
         style.configure("PreviewCancel.TButton", font=("Segoe UI", 10),
-                        foreground="#f38ba8", background="#313244")
+                        foreground=RED, background=SURFACE0)
 
         # Header
-        hdr = tk.Frame(self.win, bg="#1e1e2e")
-        hdr.pack(fill="x", padx=15, pady=(10, 5))
+        hdr = tk.Frame(self.win, bg=BG, pady=10)
+        hdr.pack(fill="x", padx=15)
         ttk.Label(hdr, text="👁 พรีวิวก่อนปริ้น",
-                  style="PreviewTitle.TLabel").pack(side="left")
+                  style="PreviewTitle.TLabel").pack(side="left", padx=(0, 15))
         ttk.Label(hdr, text=f"📄 {self.total_pages} หน้า / {self.sheets} แผ่น A4",
-                  style="PreviewInfo.TLabel").pack(side="left", padx=15)
+                  style="PreviewInfo.TLabel").pack(side="left")
 
         # Scrollable canvas for pages
-        container = tk.Frame(self.win, bg="#313244")
+        container = tk.Frame(self.win, bg=SURFACE0)
         container.pack(fill="both", expand=True, padx=15, pady=5)
 
-        self.canvas = tk.Canvas(container, bg="#313244", highlightthickness=0)
+        self.canvas = tk.Canvas(container, bg=SURFACE0,
+                                 highlightthickness=0, bd=0)
         self.scrollbar = ttk.Scrollbar(container, orient="vertical",
                                         command=self.canvas.yview)
-        self.inner = tk.Frame(self.canvas, bg="#313244")
+        self.inner = tk.Frame(self.canvas, bg=SURFACE0)
 
         self.inner.bind("<Configure>", lambda e: self.canvas.configure(
             scrollregion=self.canvas.bbox("all")))
@@ -99,10 +140,10 @@ class PreviewWindow:
         self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         # Button bar
-        btn_frame = tk.Frame(self.win, bg="#1e1e2e")
-        btn_frame.pack(fill="x", padx=15, pady=10)
+        btn_frame = tk.Frame(self.win, bg=BG, pady=10)
+        btn_frame.pack(fill="x", padx=15)
 
-        printer_txt = f" 🖨 พิมพ์ที่ {self.printer_name}" if self.printer_name else " ❌ ไม่พบเครื่องพิมพ์"
+        printer_txt = f" 🖨 {self.printer_name}" if self.printer_name else " ❌ ไม่พบเครื่องพิมพ์"
         ttk.Button(btn_frame, text=f"🖨 พิมพ์{printer_txt}",
                    style="PreviewPrint.TButton",
                    command=self._do_print).pack(side="right", padx=(8, 0))
@@ -116,7 +157,6 @@ class PreviewWindow:
                    command=self.win.destroy).pack(side="left")
 
     def _load_pages(self):
-        """แปลง PDF เป็นรูปแล้วแสดงในหน้าต่าง"""
         temp_dir = tempfile.mkdtemp(prefix="preview_")
         try:
             subprocess.run([
@@ -125,32 +165,28 @@ class PreviewWindow:
             ], capture_output=True, check=True)
 
             pngs = sorted(glob.glob(os.path.join(temp_dir, "page-*.png")))
-            max_w = 850  # max width in the scroll area
+            max_w = 850
 
             for i, png_path in enumerate(pngs):
-                # Page header
-                hdr = tk.Frame(self.inner, bg="#45475a")
+                hdr = tk.Frame(self.inner, bg=SURFACE1, pady=4)
                 hdr.pack(fill="x", padx=10, pady=(10 if i == 0 else 5, 2))
                 tk.Label(hdr, text=f"  หน้าที่ {i+1}/{len(pngs)}",
-                         fg="#cdd6f4", bg="#45475a",
+                         fg=TEXT, bg=SURFACE1,
                          font=("Segoe UI", 10, "bold")).pack(side="left")
 
-                # Load image
                 img = Image.open(png_path)
                 w, h = img.size
                 scale = min(max_w / w, 1.0)
                 new_w, new_h = int(w * scale), int(h * scale)
                 img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
                 photo = ImageTk.PhotoImage(img)
-                self.images.append(photo)  # prevent GC
+                self.images.append(photo)
 
-                lbl = tk.Label(self.inner, image=photo, bg="#313244")
+                lbl = tk.Label(self.inner, image=photo, bg=SURFACE0)
                 lbl.pack(padx=10, pady=(0, 5))
 
-            # Update scroll region
             self.inner.update_idletasks()
             self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
@@ -168,7 +204,7 @@ class PreviewWindow:
             title="บันทึกไฟล์ PDF",
             defaultextension=".pdf",
             initialfile="combined_output.pdf",
-            initialdir="/home/jakkrit/Downloads",
+            initialdir=CONFIG.get("last_directory", os.path.expanduser("~/Downloads")),
             filetypes=[("PDF", "*.pdf")],
             parent=self.win)
         if dest:
@@ -181,15 +217,15 @@ class PDFCombineApp:
     def __init__(self, root):
         self.root = root
         self.root.title("📦 PDF Combine & Print")
-        self.root.geometry("750x600")
-        self.root.configure(bg="#1e1e2e")
+        self.root.geometry(CONFIG.get("window_geometry", "900x650"))
+        self.root.configure(bg=BG)
+        self.root.minsize(700, 500)
 
-        self.files = []  # list of (path, page_count)
+        self.files = []
 
         self._build_ui()
 
     def _get_printer_name(self):
-        """ตรวจหาชื่อเครื่องพิมพ์อัตโนมัติจากระบบ ถ้าไม่เจอให้ fallback ไป default"""
         if PRINTER:
             return PRINTER
         try:
@@ -203,106 +239,140 @@ class PDFCombineApp:
     def _build_ui(self):
         style = ttk.Style()
         style.theme_use("clam")
-        style.configure("Title.TLabel", font=("Segoe UI", 16, "bold"),
-                        foreground="#cdd6f4", background="#1e1e2e")
+        style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"),
+                        foreground=TEXT, background=BG)
         style.configure("Sub.TLabel", font=("Segoe UI", 10),
-                        foreground="#a6adc8", background="#1e1e2e")
-        style.configure("Treeview", font=("Segoe UI", 10),
-                        background="#313244", foreground="#cdd6f4",
-                        fieldbackground="#313244", rowheight=28)
-        style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"),
-                        foreground="#cdd6f4", background="#45475a")
+                        foreground=SUBTEXT, background=BG)
+        style.configure("Card.TFrame", background=SURFACE0, relief="flat", borderwidth=1)
+        style.configure("Treeview", font=("Segoe UI", 11),
+                        background=SURFACE0, foreground=TEXT,
+                        fieldbackground=SURFACE0, rowheight=32,
+                        borderwidth=0, relief="flat")
+        style.configure("Treeview.Heading", font=("Segoe UI", 11, "bold"),
+                        foreground=TEXT, background=SURFACE1,
+                        relief="flat", borderwidth=0)
         style.configure("Add.TButton", font=("Segoe UI", 11, "bold"),
-                        foreground="#1e1e2e", background="#a6e3a1")
-        style.configure("Print.TButton", font=("Segoe UI", 12, "bold"),
-                        foreground="#1e1e2e", background="#89b4fa")
-        style.configure("Clear.TButton", font=("Segoe UI", 10),
-                        foreground="#f38ba8", background="#313244")
-        style.configure("Move.TButton", font=("Segoe UI", 9),
-                        foreground="#cdd6f4", background="#45475a")
-        style.configure("Status.TLabel", font=("Segoe UI", 9),
-                        foreground="#a6adc8", background="#1e1e2e")
+                        foreground="#1e1e2e", background=GREEN, relief="flat")
+        style.configure("Primary.TButton", font=("Segoe UI", 12, "bold"),
+                        foreground="#1e1e2e", background=BLUE, relief="flat")
+        style.configure("Secondary.TButton", font=("Segoe UI", 10),
+                        foreground=SUBTEXT, background=SURFACE1, relief="flat")
+        style.configure("Danger.TButton", font=("Segoe UI", 10),
+                        foreground=RED, background=SURFACE1, relief="flat")
+        style.configure("Status.TLabel", font=("Segoe UI", 10),
+                        foreground=SUBTEXT, background=BG)
+        style.configure("Action.TButton", font=("Segoe UI", 11, "bold"),
+                        foreground="#1e1e2e", background=LAVENDER, relief="flat")
 
-        # --- Header ---
-        header = tk.Frame(self.root, bg="#1e1e2e")
-        header.pack(fill="x", padx=20, pady=(15, 5))
-        ttk.Label(header, text="📦 PDF Combine & Print",
+        # --- Header (Card) ---
+        header_card = ttk.Frame(root, style="Card.TFrame", padding=20)
+        header_card.pack(fill="x", padx=15, pady=(15, 10))
+
+        title_frame = tk.Frame(header_card, bg=SURFACE0)
+        title_frame.pack(fill="x")
+        ttk.Label(title_frame, text="📦 PDF Combine & Print",
                   style="Title.TLabel").pack(side="left")
-        ttk.Label(header, text="เลือกไฟล์ PDF หลายไฟล์ แล้วกดรวม + ปริ้น",
+        ttk.Label(title_frame, text="รวม PDF จัดลง A4 แล้วปริ้นได้ทันที",
                   style="Sub.TLabel").pack(side="left", padx=15)
 
-        # --- File list ---
-        list_frame = tk.Frame(self.root, bg="#1e1e2e")
-        list_frame.pack(fill="both", expand=True, padx=20, pady=5)
+        # --- Main content ---
+        content_frame = tk.Frame(root, bg=BG)
+        content_frame.pack(fill="both", expand=True, padx=15, pady=5)
+
+        # File list card
+        list_card = ttk.Frame(content_frame, style="Card.TFrame")
+        list_card.pack(fill="both", expand=True, padx=0, pady=(0, 10))
+
+        list_header = tk.Frame(list_card, bg=SURFACE0, pady=8)
+        list_header.pack(fill="x", padx=15)
+        ttk.Label(list_header, text="📄 รายการไฟล์ PDF",
+                  font=("Segoe UI", 12, "bold"), foreground=TEXT,
+                  background=SURFACE0).pack(side="left")
+
+        list_inner = tk.Frame(list_card, bg=SURFACE0)
+        list_inner.pack(fill="both", expand=True, padx=15, pady=(0, 15))
 
         cols = ("filename", "pages", "path")
-        self.tree = ttk.Treeview(list_frame, columns=cols, show="headings",
-                                 selectmode="extended")
+        self.tree = ttk.Treeview(list_inner, columns=cols, show="headings",
+                                 selectmode="extended", height=12)
         self.tree.heading("filename", text="📄 ชื่อไฟล์")
         self.tree.heading("pages", text="หน้า")
         self.tree.heading("path", text="ที่อยู่")
-        self.tree.column("filename", width=250, minwidth=150)
+        self.tree.column("filename", width=260, minwidth=150)
         self.tree.column("pages", width=60, minwidth=40, anchor="center")
-        self.tree.column("path", width=380, minwidth=200)
+        self.tree.column("path", width=380, minwidth=150)
 
-        scrollbar = ttk.Scrollbar(list_frame, orient="vertical",
+        scrollbar = ttk.Scrollbar(list_inner, orient="vertical",
                                   command=self.tree.yview)
         self.tree.configure(yscrollcommand=scrollbar.set)
         self.tree.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
         # --- Button bar ---
-        btn_frame = tk.Frame(self.root, bg="#1e1e2e")
-        btn_frame.pack(fill="x", padx=20, pady=10)
+        btn_frame = tk.Frame(root, bg=BG, pady=10)
+        btn_frame.pack(fill="x", padx=15)
 
-        self.add_btn = ttk.Button(btn_frame, text="➕ เพิ่มไฟล์ PDF",
+        self.add_btn = ttk.Button(btn_frame, text="➕ เพิ่มไฟล์",
                                   style="Add.TButton", command=self.add_files)
         self.add_btn.pack(side="left", padx=(0, 8))
 
-        self.remove_btn = ttk.Button(btn_frame, text="🗑 ลบไฟล์ที่เลือก",
-                                     style="Clear.TButton",
+        self.remove_btn = ttk.Button(btn_frame, text="🗑 ลบ",
+                                     style="Danger.TButton",
                                      command=self.remove_selected)
         self.remove_btn.pack(side="left", padx=(0, 8))
 
         self.move_up_btn = ttk.Button(btn_frame, text="⬆",
-                                      style="Move.TButton", command=self.move_up)
+                                      style="Secondary.TButton", command=self.move_up)
         self.move_up_btn.pack(side="left", padx=(0, 3))
 
         self.move_down_btn = ttk.Button(btn_frame, text="⬇",
-                                        style="Move.TButton",
+                                        style="Secondary.TButton",
                                         command=self.move_down)
         self.move_down_btn.pack(side="left", padx=(0, 8))
 
         self.clear_btn = ttk.Button(btn_frame, text="ล้างทั้งหมด",
-                                    style="Clear.TButton",
+                                    style="Danger.TButton",
                                     command=self.clear_all)
         self.clear_btn.pack(side="left", padx=(0, 20))
 
         self.combine_btn = ttk.Button(btn_frame, text="📄 รวม PDF",
-                                      style="Add.TButton",
+                                      style="Action.TButton",
                                       command=self.combine_only)
         self.combine_btn.pack(side="left", padx=(0, 8))
 
         self.print_btn = ttk.Button(btn_frame, text="👁 รวม + พรีวิว",
-                                    style="Print.TButton",
+                                    style="Primary.TButton",
                                     command=self.combine_and_preview)
         self.print_btn.pack(side="right")
 
         # --- Info bar ---
-        printer_txt = f" ({PRINTER})" if PRINTER else ""
-        base_txt = f"เลือกไฟล์ PDF → กดเพิ่ม → เรียงลำดับ → รวม/พรีวิว/ปริ้น\nเครื่องพิมพ์ที่พบ: {printer_txt}" if PRINTER else "เลือกไฟล์ PDF → กดเพิ่ม → เรียงลำดับ → รวม/พรีวิว/ปริ้น\n❌ ไม่พบเครื่องพิมพ์ ตรวจสอบการเชื่อมต่อ"
-        self.info_var = tk.StringVar(value=base_txt)
-        ttk.Label(self.root, textvariable=self.info_var,
-                  style="Status.TLabel").pack(fill="x", padx=20, pady=(0, 15))
+        self.info_var = tk.StringVar(value=self._info_text())
+        info_bar = ttk.Frame(root, style="Card.TFrame", padding=10)
+        info_bar.pack(fill="x", padx=15, pady=(0, 15))
+        ttk.Label(info_bar, textvariable=self.info_var,
+                  style="Status.TLabel").pack(fill="x")
 
-        self.total_pages = 0
         self._update_info()
+
+    def _info_text(self):
+        printer_txt = f" ({PRINTER})" if PRINTER else ""
+        return (f"เลือกไฟล์ → กดเพิ่ม → เรียงลำดับ → รวม/พรีวิว/ปริ้น\n"
+                f"เครื่องพิมพ์ที่พบ: {printer_txt}" if PRINTER else
+                "เลือกไฟล์ → กดเพิ่ม → เรียงลำดับ → รวม/พรีวิว/ปริ้น\n"
+                "❌ ไม่พบเครื่องพิมพ์ ตรวจสอบการเชื่อมต่อ")
 
     # --- File management ---
     def add_files(self):
         paths = filedialog.askopenfilenames(
             title="เลือกไฟล์ PDF",
+            initialdir=CONFIG.get("last_directory", os.path.expanduser("~/Downloads")),
             filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")])
+        if not paths:
+            return
+        # Save last directory
+        CONFIG["last_directory"] = os.path.dirname(paths[0])
+        save_config(CONFIG)
+
         for p in paths:
             if any(f[0] == p for f in self.files):
                 continue
@@ -374,14 +444,13 @@ class PDFCombineApp:
             title="บันทึกไฟล์ PDF ที่รวมแล้ว",
             defaultextension=".pdf",
             initialfile="combined_output.pdf",
-            initialdir="/home/jakkrit/Downloads",
+            initialdir=CONFIG.get("last_directory", os.path.expanduser("~/Downloads")),
             filetypes=[("PDF", "*.pdf")])
         if not out:
             return
         self._run_combine(out, show_preview=False)
 
     def combine_and_preview(self):
-        """รวม PDF แล้วเปิดหน้าต่างพรีวิว"""
         if not self.files:
             messagebox.showwarning("ยังไม่มีไฟล์", "กรุณาเพิ่มไฟล์ PDF ก่อน")
             return
@@ -400,7 +469,6 @@ class PDFCombineApp:
     def _combine_worker(self, output_pdf, show_preview):
         temp_dir = tempfile.mkdtemp(prefix="pdf_combine_")
         try:
-            # 1. Convert all PDFs to PNG
             self.root.after(0, lambda: self.info_var.set(
                 "⏳ แปลง PDF เป็นรูปภาพ 300 DPI..."))
             png_files = []
@@ -422,7 +490,6 @@ class PDFCombineApp:
             total = len(png_files)
             sheets = (total + 3) // 4
 
-            # 2. Compose A4 sheets
             self.root.after(0, lambda: self.info_var.set(
                 f"🎨 กำลังจัดเรียง {total} หน้า ลง A4 {sheets} แผ่น..."))
 
@@ -454,7 +521,6 @@ class PDFCombineApp:
             c.save()
 
             if show_preview:
-                # 3. Show preview window
                 printer_name = self._get_printer_name()
                 self.root.after(0, lambda: (
                     self.info_var.set(
@@ -480,7 +546,6 @@ class PDFCombineApp:
             shutil.rmtree(temp_dir, ignore_errors=True)
 
     def _print_file(self, pdf_path, printer_name):
-        """สั่งปริ้นจริง"""
         self.info_var.set(f"🖨 สั่งปริ้นไปที่ {printer_name}...")
         self.root.update_idletasks()
 
