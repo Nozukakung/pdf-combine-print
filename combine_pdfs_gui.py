@@ -16,6 +16,7 @@ from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.utils import ImageReader
 from PyPDF2 import PdfReader
+from PIL import Image, ImageTk
 
 A4_W, A4_H = A4
 HALF_W = A4_W / 2
@@ -35,6 +36,146 @@ def _detect_printer():
     return None
 
 PRINTER = _detect_printer()
+
+class PreviewWindow:
+    """หน้าต่างพรีวิวก่อนปริ้น — แสดงทุกหน้าที่รวมแล้ว"""
+    def __init__(self, parent, pdf_path, total_pages, sheets, printer_name, on_print_callback):
+        self.pdf_path = pdf_path
+        self.total_pages = total_pages
+        self.sheets = sheets
+        self.printer_name = printer_name
+        self.on_print = on_print_callback
+        self.images = []  # keep refs
+
+        self.win = tk.Toplevel(parent)
+        self.win.title(f"👁 พรีวิว — {total_pages} หน้า / {sheets} แผ่น A4")
+        self.win.geometry("900x700")
+        self.win.configure(bg="#1e1e2e")
+        self.win.transient(parent)
+        self.win.grab_set()
+
+        self._build_ui()
+        self._load_pages()
+
+    def _build_ui(self):
+        style = ttk.Style()
+        style.configure("PreviewTitle.TLabel", font=("Segoe UI", 14, "bold"),
+                        foreground="#cdd6f4", background="#1e1e2e")
+        style.configure("PreviewInfo.TLabel", font=("Segoe UI", 10),
+                        foreground="#a6adc8", background="#1e1e2e")
+        style.configure("PreviewPrint.TButton", font=("Segoe UI", 12, "bold"),
+                        foreground="#1e1e2e", background="#a6e3a1")
+        style.configure("PreviewCancel.TButton", font=("Segoe UI", 10),
+                        foreground="#f38ba8", background="#313244")
+
+        # Header
+        hdr = tk.Frame(self.win, bg="#1e1e2e")
+        hdr.pack(fill="x", padx=15, pady=(10, 5))
+        ttk.Label(hdr, text="👁 พรีวิวก่อนปริ้น",
+                  style="PreviewTitle.TLabel").pack(side="left")
+        ttk.Label(hdr, text=f"📄 {self.total_pages} หน้า / {self.sheets} แผ่น A4",
+                  style="PreviewInfo.TLabel").pack(side="left", padx=15)
+
+        # Scrollable canvas for pages
+        container = tk.Frame(self.win, bg="#313244")
+        container.pack(fill="both", expand=True, padx=15, pady=5)
+
+        self.canvas = tk.Canvas(container, bg="#313244", highlightthickness=0)
+        self.scrollbar = ttk.Scrollbar(container, orient="vertical",
+                                        command=self.canvas.yview)
+        self.inner = tk.Frame(self.canvas, bg="#313244")
+
+        self.inner.bind("<Configure>", lambda e: self.canvas.configure(
+            scrollregion=self.canvas.bbox("all")))
+        self.canvas.create_window((0, 0), window=self.inner, anchor="nw")
+        self.canvas.configure(yscrollcommand=self.scrollbar.set)
+
+        self.canvas.pack(side="left", fill="both", expand=True)
+        self.scrollbar.pack(side="right", fill="y")
+
+        # Mouse wheel scroll
+        def _on_mousewheel(event):
+            self.canvas.yview_scroll(int(-1 * (event.delta / 120)), "units")
+        self.canvas.bind_all("<MouseWheel>", _on_mousewheel)
+
+        # Button bar
+        btn_frame = tk.Frame(self.win, bg="#1e1e2e")
+        btn_frame.pack(fill="x", padx=15, pady=10)
+
+        printer_txt = f" 🖨 พิมพ์ที่ {self.printer_name}" if self.printer_name else " ❌ ไม่พบเครื่องพิมพ์"
+        ttk.Button(btn_frame, text=f"🖨 พิมพ์{printer_txt}",
+                   style="PreviewPrint.TButton",
+                   command=self._do_print).pack(side="right", padx=(8, 0))
+
+        ttk.Button(btn_frame, text="💾 บันทึกอย่างเดียว",
+                   style="PreviewPrint.TButton",
+                   command=self._do_save).pack(side="right", padx=(8, 0))
+
+        ttk.Button(btn_frame, text="✖ ปิด",
+                   style="PreviewCancel.TButton",
+                   command=self.win.destroy).pack(side="left")
+
+    def _load_pages(self):
+        """แปลง PDF เป็นรูปแล้วแสดงในหน้าต่าง"""
+        temp_dir = tempfile.mkdtemp(prefix="preview_")
+        try:
+            subprocess.run([
+                "pdftoppm", "-png", "-r", "200", self.pdf_path,
+                os.path.join(temp_dir, "page")
+            ], capture_output=True, check=True)
+
+            pngs = sorted(glob.glob(os.path.join(temp_dir, "page-*.png")))
+            max_w = 850  # max width in the scroll area
+
+            for i, png_path in enumerate(pngs):
+                # Page header
+                hdr = tk.Frame(self.inner, bg="#45475a")
+                hdr.pack(fill="x", padx=10, pady=(10 if i == 0 else 5, 2))
+                tk.Label(hdr, text=f"  หน้าที่ {i+1}/{len(pngs)}",
+                         fg="#cdd6f4", bg="#45475a",
+                         font=("Segoe UI", 10, "bold")).pack(side="left")
+
+                # Load image
+                img = Image.open(png_path)
+                w, h = img.size
+                scale = min(max_w / w, 1.0)
+                new_w, new_h = int(w * scale), int(h * scale)
+                img = img.resize((new_w, new_h), Image.Resampling.LANCZOS)
+                photo = ImageTk.PhotoImage(img)
+                self.images.append(photo)  # prevent GC
+
+                lbl = tk.Label(self.inner, image=photo, bg="#313244")
+                lbl.pack(padx=10, pady=(0, 5))
+
+            # Update scroll region
+            self.inner.update_idletasks()
+            self.canvas.configure(scrollregion=self.canvas.bbox("all"))
+
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _do_print(self):
+        if not self.printer_name:
+            messagebox.showerror("ไม่พบเครื่องพิมพ์",
+                "ไม่พบเครื่องพิมพ์ในระบบ Linux\nกรุณาตรวจสอบการเชื่อมต่อ",
+                parent=self.win)
+            return
+        self.on_print(self.pdf_path, self.printer_name)
+        self.win.destroy()
+
+    def _do_save(self):
+        dest = filedialog.asksaveasfilename(
+            title="บันทึกไฟล์ PDF",
+            defaultextension=".pdf",
+            initialfile="combined_output.pdf",
+            initialdir="/home/jakkrit/Downloads",
+            filetypes=[("PDF", "*.pdf")],
+            parent=self.win)
+        if dest:
+            shutil.copy2(self.pdf_path, dest)
+            messagebox.showinfo("บันทึกแล้ว", f"บันทึกไฟล์ที่:\n{dest}", parent=self.win)
+            self.win.destroy()
+
 
 class PDFCombineApp:
     def __init__(self, root):
@@ -83,7 +224,7 @@ class PDFCombineApp:
                         foreground="#a6adc8", background="#1e1e2e")
 
         # --- Header ---
-        header = tk.Frame(root, bg="#1e1e2e")
+        header = tk.Frame(self.root, bg="#1e1e2e")
         header.pack(fill="x", padx=20, pady=(15, 5))
         ttk.Label(header, text="📦 PDF Combine & Print",
                   style="Title.TLabel").pack(side="left")
@@ -91,7 +232,7 @@ class PDFCombineApp:
                   style="Sub.TLabel").pack(side="left", padx=15)
 
         # --- File list ---
-        list_frame = tk.Frame(root, bg="#1e1e2e")
+        list_frame = tk.Frame(self.root, bg="#1e1e2e")
         list_frame.pack(fill="both", expand=True, padx=20, pady=5)
 
         cols = ("filename", "pages", "path")
@@ -111,7 +252,7 @@ class PDFCombineApp:
         scrollbar.pack(side="right", fill="y")
 
         # --- Button bar ---
-        btn_frame = tk.Frame(root, bg="#1e1e2e")
+        btn_frame = tk.Frame(self.root, bg="#1e1e2e")
         btn_frame.pack(fill="x", padx=20, pady=10)
 
         self.add_btn = ttk.Button(btn_frame, text="➕ เพิ่มไฟล์ PDF",
@@ -142,16 +283,16 @@ class PDFCombineApp:
                                       command=self.combine_only)
         self.combine_btn.pack(side="left", padx=(0, 8))
 
-        self.print_btn = ttk.Button(btn_frame, text="🖨 รวม + ปริ้น",
+        self.print_btn = ttk.Button(btn_frame, text="👁 รวม + พรีวิว",
                                     style="Print.TButton",
-                                    command=self.combine_and_print)
+                                    command=self.combine_and_preview)
         self.print_btn.pack(side="right")
 
         # --- Info bar ---
         printer_txt = f" ({PRINTER})" if PRINTER else ""
-        base_txt = f"เลือกไฟล์ PDF ได้หลายไฟล์ → กดเพิ่ม → เรียงลำดับ → รวม/ปริ้น\nเครื่องพิมพ์ที่พบ: {printer_txt}" if PRINTER else "เลือกไฟล์ PDF ได้หลายไฟล์ → กดเพิ่ม → เรียงลำดับ → รวม/ปริ้น\n❌ ไม่พบเครื่องพิมพ์ ตรวจสอบการเชื่อมต่อ"
+        base_txt = f"เลือกไฟล์ PDF → กดเพิ่ม → เรียงลำดับ → รวม/พรีวิว/ปริ้น\nเครื่องพิมพ์ที่พบ: {printer_txt}" if PRINTER else "เลือกไฟล์ PDF → กดเพิ่ม → เรียงลำดับ → รวม/พรีวิว/ปริ้น\n❌ ไม่พบเครื่องพิมพ์ ตรวจสอบการเชื่อมต่อ"
         self.info_var = tk.StringVar(value=base_txt)
-        ttk.Label(root, textvariable=self.info_var,
+        ttk.Label(self.root, textvariable=self.info_var,
                   style="Status.TLabel").pack(fill="x", padx=20, pady=(0, 15))
 
         self.total_pages = 0
@@ -191,7 +332,6 @@ class PDFCombineApp:
         idx = self.tree.index(item)
         if idx == 0:
             return
-        vals = self.tree.item(item, "values")
         self.tree.delete(item)
         prev = self.tree.get_children()[idx - 1]
         self.tree.move(item, prev, "above")
@@ -206,7 +346,6 @@ class PDFCombineApp:
         idx = self.tree.index(item)
         if idx >= len(self.files) - 1:
             return
-        vals = self.tree.item(item, "values")
         self.tree.delete(item)
         nxt = self.tree.get_children()[idx + 1]
         self.tree.move(item, nxt, "below")
@@ -239,25 +378,26 @@ class PDFCombineApp:
             filetypes=[("PDF", "*.pdf")])
         if not out:
             return
-        self._run_combine(out, auto_print=False)
+        self._run_combine(out, show_preview=False)
 
-    def combine_and_print(self):
+    def combine_and_preview(self):
+        """รวม PDF แล้วเปิดหน้าต่างพรีวิว"""
         if not self.files:
             messagebox.showwarning("ยังไม่มีไฟล์", "กรุณาเพิ่มไฟล์ PDF ก่อน")
             return
-        out = "/home/jakkrit/Downloads/combined_output.pdf"
-        self._run_combine(out, auto_print=True)
+        out = os.path.join(tempfile.gettempdir(), "pdf_combine_preview.pdf")
+        self._run_combine(out, show_preview=True)
 
-    def _run_combine(self, output_pdf, auto_print=False):
+    def _run_combine(self, output_pdf, show_preview=False):
         self.info_var.set("⏳ กำลังรวมไฟล์...")
         self.root.update_idletasks()
         threading.Thread(
             target=self._combine_worker,
-            args=(output_pdf, auto_print),
+            args=(output_pdf, show_preview),
             daemon=True
         ).start()
 
-    def _combine_worker(self, output_pdf, auto_print):
+    def _combine_worker(self, output_pdf, show_preview):
         temp_dir = tempfile.mkdtemp(prefix="pdf_combine_")
         try:
             # 1. Convert all PDFs to PNG
@@ -297,12 +437,10 @@ class PDFCombineApp:
                 area_x = col * HALF_W
                 area_y = HALF_H if row == 0 else 0
 
-                # Light border
                 c.setStrokeColorRGB(0.85, 0.85, 0.85)
                 c.setLineWidth(0.5)
                 c.rect(area_x + 2, area_y + 2, HALF_W - 4, HALF_H - 4)
 
-                # Load & scale
                 img = ImageReader(png_path)
                 iw, ih = img.getSize()
                 aw = HALF_W - 2 * MARGIN
@@ -311,45 +449,19 @@ class PDFCombineApp:
                 dw, dh = iw * scale, ih * scale
                 x = area_x + MARGIN + (aw - dw) / 2
                 y = area_y + MARGIN + (ah - dh) / 2
-
                 c.drawImage(png_path, x, y, width=dw, height=dh)
 
             c.save()
 
-            # 3. Print
-            printer_name = self._get_printer_name()
-            if auto_print:
-                if not printer_name:
-                    self.root.after(0, lambda: (
-                        self.info_var.set("⚠️ ไม่พบเครื่องพิมพ์ที่เปิดใช้งานในระบบ"),
-                        messagebox.showerror("ไม่พบเครื่องพิมพ์", 
-                            "ไม่พบเครื่องพิมพ์ใดๆ ในระบบปฏิบัติการ Linux ของคุณ\n"
-                            "กรุณาตรวจสอบว่าเปิดเครื่องพิมพ์และเชื่อมต่ออยู่")
-                    ))
-                    return
-
-                self.root.after(0, lambda: self.info_var.set(
-                    f"🖨 สั่งปริ้นไปที่ {printer_name}..."))
-                result = subprocess.run(
-                    ["lp", "-d", printer_name, output_pdf],
-                    capture_output=True, text=True, timeout=30)
-                if result.returncode == 0:
-                    self.root.after(0, lambda: (
-                        self.info_var.set(
-                            f"✅ ปริ้นสำเร็จ! {total} หน้า / {sheets} แผ่น A4 (พิมพ์ผ่าน {printer_name})"),
-                        messagebox.showinfo("สำเร็จ!",
-                            f"ส่งไฟล์ไปปริ้นที่ {printer_name} เรียบร้อย\n"
-                            f"📄 {total} หน้า จัดลง A4 {sheets} แผ่น\n"
-                            f"💾 ไฟล์: {output_pdf}")
-                    ))
-                else:
-                    self.root.after(0, lambda r=result.stderr: (
-                        self.info_var.set(f"⚠️ ปริ้นไม่สำเร็จผ่าน {printer_name}"),
-                        messagebox.showwarning("ปริ้นไม่สำเร็จ",
-                            f"ล้มเหลว: {r}\n\n"
-                            f"แต่ไฟล์รวมอยู่ที่:\n{output_pdf}\n\n"
-                            f"ลองสั่งเอง: lp -d {printer_name} {output_pdf}")
-                    ))
+            if show_preview:
+                # 3. Show preview window
+                printer_name = self._get_printer_name()
+                self.root.after(0, lambda: (
+                    self.info_var.set(
+                        f"✅ รวมเสร็จ! {total} หน้า / {sheets} แผ่น A4 — เปิดพรีวิว..."),
+                    PreviewWindow(self.root, output_pdf, total, sheets,
+                                  printer_name, self._print_file)
+                ))
             else:
                 self.root.after(0, lambda: (
                     self.info_var.set(
@@ -366,6 +478,35 @@ class PDFCombineApp:
             ))
         finally:
             shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def _print_file(self, pdf_path, printer_name):
+        """สั่งปริ้นจริง"""
+        self.info_var.set(f"🖨 สั่งปริ้นไปที่ {printer_name}...")
+        self.root.update_idletasks()
+
+        def _worker():
+            try:
+                result = subprocess.run(
+                    ["lp", "-d", printer_name, pdf_path],
+                    capture_output=True, text=True, timeout=30)
+                if result.returncode == 0:
+                    self.root.after(0, lambda: (
+                        self.info_var.set(f"✅ ปริ้นสำเร็จ! (พิมพ์ผ่าน {printer_name})"),
+                        messagebox.showinfo("สำเร็จ!",
+                            f"ส่งไฟล์ไปปริ้นที่ {printer_name} เรียบร้อย")
+                    ))
+                else:
+                    self.root.after(0, lambda r=result.stderr: (
+                        self.info_var.set(f"⚠️ ปริ้นไม่สำเร็จผ่าน {printer_name}"),
+                        messagebox.showwarning("ปริ้นไม่สำเร็จ",
+                            f"ล้มเหลว: {r}\n\nลองสั่งเอง: lp -d {printer_name} {pdf_path}")
+                    ))
+            except Exception as e:
+                self.root.after(0, lambda: (
+                    self.info_var.set(f"❌ ปริ้นไม่สำเร็จ: {e}"),
+                    messagebox.showerror("ผิดพลาด", str(e))
+                ))
+        threading.Thread(target=_worker, daemon=True).start()
 
 
 if __name__ == "__main__":
