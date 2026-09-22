@@ -10,5 +10,7 @@ Thumbs.db
 *.swp
 *.swo
 launch.vbs
+launch.bat
+run_gui.sh
 create_shortcut.ps1
 icons/*.ico

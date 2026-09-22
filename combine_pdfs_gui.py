@@ -45,6 +45,8 @@ TEAL = "#94e2d5"
 YELLOW = "#f9e2af"
 SKY = "#89dceb"
 
+FONT_FAMILY = "Noto Sans Thai"
+
 def load_config():
     config = {"last_directory": os.path.expanduser("~/Downloads")}
     try:
@@ -97,13 +99,13 @@ class PreviewWindow:
     def _build_ui(self):
         style = ttk.Style()
         style.theme_use("clam")
-        style.configure("PreviewTitle.TLabel", font=("Segoe UI", 14, "bold"),
+        style.configure("PreviewTitle.TLabel", font=(FONT_FAMILY, 14, "bold"),
                         foreground=TEXT, background=BG)
-        style.configure("PreviewInfo.TLabel", font=("Segoe UI", 10),
+        style.configure("PreviewInfo.TLabel", font=(FONT_FAMILY, 10),
                         foreground=SUBTEXT, background=BG)
-        style.configure("PreviewPrint.TButton", font=("Segoe UI", 12, "bold"),
+        style.configure("PreviewPrint.TButton", font=(FONT_FAMILY, 12, "bold"),
                         foreground="#1e1e2e", background=GREEN)
-        style.configure("PreviewCancel.TButton", font=("Segoe UI", 10),
+        style.configure("PreviewCancel.TButton", font=(FONT_FAMILY, 10),
                         foreground=RED, background=SURFACE0)
 
         # Header
@@ -170,7 +172,7 @@ class PreviewWindow:
                 hdr.pack(fill="x", padx=10, pady=(10 if i == 0 else 5, 2))
                 tk.Label(hdr, text=f"  หน้าที่ {i+1}/{len(pngs)}",
                          fg=TEXT, bg=SURFACE1,
-                         font=("Segoe UI", 10, "bold")).pack(side="left")
+                         font=(FONT_FAMILY, 10, "bold")).pack(side="left")
 
                 img = Image.open(png_path)
                 w, h = img.size
@@ -222,6 +224,10 @@ class PDFCombineApp:
         self.files = []
 
         self._build_ui()
+        self.root.deiconify()
+        self.root.lift()
+        self.root.attributes("-topmost", True)
+        self.root.after_idle(self.root.attributes, "-topmost", False)
 
     def _get_printer_name(self):
         if PRINTER:
@@ -237,29 +243,29 @@ class PDFCombineApp:
     def _build_ui(self):
         style = ttk.Style()
         style.theme_use("clam")
-        style.configure("Title.TLabel", font=("Segoe UI", 18, "bold"),
+        style.configure("Title.TLabel", font=(FONT_FAMILY, 18, "bold"),
                         foreground=TEXT, background=BG)
-        style.configure("Sub.TLabel", font=("Segoe UI", 10),
+        style.configure("Sub.TLabel", font=(FONT_FAMILY, 10),
                         foreground=SUBTEXT, background=BG)
         style.configure("Card.TFrame", background=SURFACE0, relief="flat", borderwidth=1)
-        style.configure("Treeview", font=("Segoe UI", 11),
+        style.configure("Treeview", font=(FONT_FAMILY, 11),
                         background=SURFACE0, foreground=TEXT,
                         fieldbackground=SURFACE0, rowheight=32,
                         borderwidth=0, relief="flat")
-        style.configure("Treeview.Heading", font=("Segoe UI", 11, "bold"),
+        style.configure("Treeview.Heading", font=(FONT_FAMILY, 11, "bold"),
                         foreground=TEXT, background=SURFACE1,
                         relief="flat", borderwidth=0)
-        style.configure("Add.TButton", font=("Segoe UI", 11, "bold"),
+        style.configure("Add.TButton", font=(FONT_FAMILY, 11, "bold"),
                         foreground="#1e1e2e", background=GREEN, relief="flat")
-        style.configure("Primary.TButton", font=("Segoe UI", 12, "bold"),
+        style.configure("Primary.TButton", font=(FONT_FAMILY, 12, "bold"),
                         foreground="#1e1e2e", background=BLUE, relief="flat")
-        style.configure("Secondary.TButton", font=("Segoe UI", 10),
+        style.configure("Secondary.TButton", font=(FONT_FAMILY, 10),
                         foreground=SUBTEXT, background=SURFACE1, relief="flat")
-        style.configure("Danger.TButton", font=("Segoe UI", 10),
+        style.configure("Danger.TButton", font=(FONT_FAMILY, 10),
                         foreground=RED, background=SURFACE1, relief="flat")
-        style.configure("Status.TLabel", font=("Segoe UI", 10),
+        style.configure("Status.TLabel", font=(FONT_FAMILY, 10),
                         foreground=SUBTEXT, background=BG)
-        style.configure("Action.TButton", font=("Segoe UI", 11, "bold"),
+        style.configure("Action.TButton", font=(FONT_FAMILY, 11, "bold"),
                         foreground="#1e1e2e", background=LAVENDER, relief="flat")
 
         # --- Header (Card) ---
@@ -284,7 +290,7 @@ class PDFCombineApp:
         list_header = tk.Frame(list_card, bg=SURFACE0, pady=8)
         list_header.pack(fill="x", padx=15)
         ttk.Label(list_header, text="📄 รายการไฟล์ PDF",
-                  font=("Segoe UI", 12, "bold"), foreground=TEXT,
+                  font=(FONT_FAMILY, 12, "bold"), foreground=TEXT,
                   background=SURFACE0).pack(side="left")
 
         list_inner = tk.Frame(list_card, bg=SURFACE0)
