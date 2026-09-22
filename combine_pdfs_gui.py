@@ -263,7 +263,7 @@ class PDFCombineApp:
                         foreground="#1e1e2e", background=LAVENDER, relief="flat")
 
         # --- Header (Card) ---
-        header_card = ttk.Frame(root, style="Card.TFrame", padding=20)
+        header_card = ttk.Frame(self.root, style="Card.TFrame", padding=20)
         header_card.pack(fill="x", padx=15, pady=(15, 10))
 
         title_frame = tk.Frame(header_card, bg=SURFACE0)
@@ -274,7 +274,7 @@ class PDFCombineApp:
                   style="Sub.TLabel").pack(side="left", padx=15)
 
         # --- Main content ---
-        content_frame = tk.Frame(root, bg=BG)
+        content_frame = tk.Frame(self.root, bg=BG)
         content_frame.pack(fill="both", expand=True, padx=15, pady=5)
 
         # File list card
@@ -307,7 +307,7 @@ class PDFCombineApp:
         scrollbar.pack(side="right", fill="y")
 
         # --- Button bar ---
-        btn_frame = tk.Frame(root, bg=BG, pady=10)
+        btn_frame = tk.Frame(self.root, bg=BG, pady=10)
         btn_frame.pack(fill="x", padx=15)
 
         self.add_btn = ttk.Button(btn_frame, text="➕ เพิ่มไฟล์",
@@ -345,7 +345,7 @@ class PDFCombineApp:
 
         # --- Info bar ---
         self.info_var = tk.StringVar(value=self._info_text())
-        info_bar = ttk.Frame(root, style="Card.TFrame", padding=10)
+        info_bar = ttk.Frame(self.root, style="Card.TFrame", padding=10)
         info_bar.pack(fill="x", padx=15, pady=(0, 15))
         ttk.Label(info_bar, textvariable=self.info_var,
                   style="Status.TLabel").pack(fill="x")
