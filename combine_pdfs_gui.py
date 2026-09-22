@@ -18,6 +18,7 @@ from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.utils import ImageReader
 from PyPDF2 import PdfReader
 from PIL import Image, ImageTk
+from printer_utils import get_printers, send_to_printer
 
 A4_W, A4_H = A4
 HALF_W = A4_W / 2
@@ -62,13 +63,10 @@ def save_config(config):
         pass
 
 def _detect_printer():
-    """ตรวจหาเครื่องพิมพ์ที่ต่อกับเครื่องอัตโนมัติ"""
+    """ตรวจหาเครื่องพิมพ์ที่ต่อกับเครื่องอัตโนมัติ (รองรับ Windows และ Linux)"""
     try:
-        result = subprocess.run(["lpstat", "-p"], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0 and result.stdout.strip():
-            for line in result.stdout.strip().split("\n"):
-                if line.startswith("printer "):
-                    return line.split()[1]
+        _, default_p = get_printers()
+        return default_p
     except Exception:
         pass
     return None
@@ -193,7 +191,7 @@ class PreviewWindow:
     def _do_print(self):
         if not self.printer_name:
             messagebox.showerror("ไม่พบเครื่องพิมพ์",
-                "ไม่พบเครื่องพิมพ์ในระบบ Linux\nกรุณาตรวจสอบการเชื่อมต่อ",
+                "ไม่พบเครื่องพิมพ์ในระบบ\nกรุณาตรวจสอบการเชื่อมต่อเครื่องพิมพ์",
                 parent=self.win)
             return
         self.on_print(self.pdf_path, self.printer_name)
@@ -229,9 +227,9 @@ class PDFCombineApp:
         if PRINTER:
             return PRINTER
         try:
-            result = subprocess.run(["lpstat", "-d"], capture_output=True, text=True, timeout=5)
-            if "system default destination:" in result.stdout:
-                return result.stdout.split(":")[1].strip()
+            _, default_p = get_printers()
+            if default_p:
+                return default_p
         except Exception:
             pass
         return None
@@ -551,20 +549,18 @@ class PDFCombineApp:
 
         def _worker():
             try:
-                result = subprocess.run(
-                    ["lp", "-d", printer_name, pdf_path],
-                    capture_output=True, text=True, timeout=30)
-                if result.returncode == 0:
+                success, msg = send_to_printer(pdf_path, printer_name)
+                if success:
                     self.root.after(0, lambda: (
                         self.info_var.set(f"✅ ปริ้นสำเร็จ! (พิมพ์ผ่าน {printer_name})"),
                         messagebox.showinfo("สำเร็จ!",
                             f"ส่งไฟล์ไปปริ้นที่ {printer_name} เรียบร้อย")
                     ))
                 else:
-                    self.root.after(0, lambda r=result.stderr: (
+                    self.root.after(0, lambda r=msg: (
                         self.info_var.set(f"⚠️ ปริ้นไม่สำเร็จผ่าน {printer_name}"),
                         messagebox.showwarning("ปริ้นไม่สำเร็จ",
-                            f"ล้มเหลว: {r}\n\nลองสั่งเอง: lp -d {printer_name} {pdf_path}")
+                            f"ล้มเหลว: {r}\n\nตรวจสอบสถานะเครื่องพิมพ์และการเชื่อมต่อ")
                     ))
             except Exception as e:
                 self.root.after(0, lambda: (

@@ -9,3 +9,6 @@ __pycache__/
 Thumbs.db
 *.swp
 *.swo
+launch.vbs
+create_shortcut.ps1
+icons/*.ico

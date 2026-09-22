@@ -9,6 +9,9 @@ import argparse
 from reportlab.lib.pagesizes import A4
 from reportlab.pdfgen import canvas as rl_canvas
 from reportlab.lib.utils import ImageReader
+from PyPDF2 import PdfReader
+from PIL import Image
+from printer_utils import get_printers, send_to_printer
 
 A4_W, A4_H = A4
 HALF_W = A4_W / 2
@@ -17,11 +20,8 @@ MARGIN = 8
 
 def _detect_printer():
     try:
-        result = subprocess.run(["lpstat", "-p"], capture_output=True, text=True, timeout=5)
-        if result.returncode == 0 and result.stdout.strip():
-            for line in result.stdout.strip().split("\n"):
-                if line.startswith("printer "):
-                    return line.split()[1]
+        _, default_p = get_printers()
+        return default_p
     except Exception:
         pass
     return None
@@ -131,11 +131,11 @@ def combine_pdfs(input_pdfs, output_pdf, slots_per_page=4, resolution=300, auto_
                 print("❌ ไม่พบเครื่องพิมพ์ในระบบ")
                 return False
             print(f"🖨 สั่งปริ้นไปที่ {printer_name}...")
-            result = subprocess.run(["lp", "-d", printer_name, output_pdf], capture_output=True, text=True, timeout=30)
-            if result.returncode == 0:
+            ok, msg = send_to_printer(output_pdf, printer_name)
+            if ok:
                 print(f"✅ ส่งไฟล์ไปปริ้นสำเร็จ!")
             else:
-                print(f"❌ ปริ้นไม่สำเร็จ: {result.stderr}")
+                print(f"❌ ปริ้นไม่สำเร็จ: {msg}")
 
         return True
 
