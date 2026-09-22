@@ -19,6 +19,7 @@ from reportlab.lib.utils import ImageReader
 from PyPDF2 import PdfReader
 from PIL import Image, ImageTk
 from printer_utils import get_printers, send_to_printer
+from pdf_renderer import pdf_to_pngs
 
 A4_W, A4_H = A4
 HALF_W = A4_W / 2
@@ -45,7 +46,7 @@ TEAL = "#94e2d5"
 YELLOW = "#f9e2af"
 SKY = "#89dceb"
 
-FONT_FAMILY = "Noto Sans Thai"
+FONT_FAMILY = "Segoe UI" if sys.platform == "win32" else "Noto Sans Thai"
 
 def load_config():
     config = {"last_directory": os.path.expanduser("~/Downloads")}
@@ -159,12 +160,7 @@ class PreviewWindow:
     def _load_pages(self):
         temp_dir = tempfile.mkdtemp(prefix="preview_")
         try:
-            subprocess.run([
-                "pdftoppm", "-png", "-r", "200", self.pdf_path,
-                os.path.join(temp_dir, "page")
-            ], capture_output=True, check=True)
-
-            pngs = sorted(glob.glob(os.path.join(temp_dir, "page-*.png")))
+            pngs = pdf_to_pngs(self.pdf_path, temp_dir, prefix_name="page", dpi=200)
             max_w = 850
 
             for i, png_path in enumerate(pngs):
@@ -477,11 +473,7 @@ class PDFCombineApp:
                 "⏳ แปลง PDF เป็นรูปภาพ 300 DPI..."))
             png_files = []
             for i, (pdf_path, _) in enumerate(self.files):
-                prefix = os.path.join(temp_dir, f"pdf_{i:03d}")
-                subprocess.run([
-                    "pdftoppm", "-png", "-r", "300", pdf_path, prefix
-                ], capture_output=True, check=True)
-                found = sorted(glob.glob(f"{prefix}-*.png"))
+                found = pdf_to_pngs(pdf_path, temp_dir, prefix_name=f"pdf_{i:03d}", dpi=300)
                 png_files.extend(found)
                 self.root.after(0, lambda p=os.path.basename(pdf_path), c=len(found):
                     self.info_var.set(f"  ✅ แปลง {p} → {c} หน้า"))

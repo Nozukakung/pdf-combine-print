@@ -7,18 +7,19 @@ import json
 def get_printers():
     """
     ตรวจหาเครื่องพิมพ์ทั้งหมดที่มีในระบบ
-    รองรับทั้ง Native Linux (CUPS) และ WSL -> Windows Printers
+    รองรับทั้ง Native Windows, WSL -> Windows Printers, และ Native Linux (CUPS)
     คืนค่า (printers_list, default_printer)
     """
     printers = []
     default_printer = None
 
-    # 1. ลองดึงจาก Windows ผ่าน PowerShell ถ้าอยู่ใน WSL หรือ Windows
-    if shutil.which("powershell.exe"):
+    # 1. รันบน Windows ตรงๆ หรือผ่าน PowerShell
+    if sys.platform == "win32" or shutil.which("powershell.exe"):
         try:
+            ps_bin = "powershell.exe" if shutil.which("powershell.exe") else "powershell"
             ps_script = "Get-CimInstance Win32_Printer | Select-Object Name, Default | ConvertTo-Json"
             res = subprocess.run(
-                ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
+                [ps_bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_script],
                 capture_output=True, text=True, timeout=6
             )
             if res.returncode == 0 and res.stdout.strip():
@@ -38,7 +39,7 @@ def get_printers():
         except Exception:
             pass
 
-    # 2. ถ้าไม่ใช่ WSL หรือดึงจาก Windows ไม่ได้ ให้ตรวจหาผ่าน CUPS (Linux เดิม)
+    # 2. Native Linux ผ่าน CUPS
     if shutil.which("lpstat"):
         try:
             res = subprocess.run(["lpstat", "-p"], capture_output=True, text=True, timeout=5)
@@ -60,37 +61,38 @@ def get_printers():
 def send_to_printer(pdf_path, printer_name):
     """
     สั่งพิมพ์ไฟล์ PDF
-    รองรับทั้ง Windows Printers (ผ่าน Ghostscript/PowerShell ใน WSL) และ CUPS (lp)
+    รองรับทั้ง Native Windows (.NET PrintDocument), WSL, และ CUPS (lp)
     """
-    # ตรวจสอบว่าเป็น WSL / Windows หรือไม่
-    if shutil.which("powershell.exe"):
-        # แปลง path จาก /mnt/c/... เป็น C:\...
-        try:
-            w_path = subprocess.run(
-                ["wslpath", "-w", os.path.abspath(pdf_path)],
-                capture_output=True, text=True, check=True
-            ).stdout.strip()
-        except Exception:
-            w_path = os.path.abspath(pdf_path)
-
-        # วิธีที่ 1: ถ้ามี Ghostscript ให้แปลง PDF เป็นรูปชั่วคราวแล้วพิมพ์ผ่าน .NET PrintDocument
-        # เพื่อความคมชัดสูงและตรงตามขนาด A4
-        if shutil.which("gs"):
-            import tempfile
-            import glob
-            temp_dir = tempfile.mkdtemp(prefix="win_print_")
+    # 1. Native Windows หรือ WSL
+    if sys.platform == "win32" or shutil.which("powershell.exe"):
+        abs_pdf = os.path.abspath(pdf_path)
+        if sys.platform != "win32":
+            # WSL path -> Windows path
             try:
-                img_pattern = os.path.join(temp_dir, "page_%03d.png")
-                gs_res = subprocess.run([
-                    "gs", "-dNOPAUSE", "-dBATCH", "-sDEVICE=png16m",
-                    "-r300", f"-sOutputFile={img_pattern}", pdf_path
-                ], capture_output=True, text=True, timeout=60)
-
-                # ดึง path ของภาพฝั่ง Windows
-                w_temp_dir = subprocess.run(
-                    ["wslpath", "-w", temp_dir],
+                w_path = subprocess.run(
+                    ["wslpath", "-w", abs_pdf],
                     capture_output=True, text=True, check=True
                 ).stdout.strip()
+            except Exception:
+                w_path = abs_pdf
+        else:
+            w_path = abs_pdf
+
+        # สั่งพิมพ์โดยตรงผ่าน PowerShell .NET โดยแปลงหน้าด้วย pdf_renderer
+        import tempfile
+        from pdf_renderer import pdf_to_pngs
+
+        temp_dir = tempfile.mkdtemp(prefix="win_print_")
+        try:
+            png_list = pdf_to_pngs(abs_pdf, temp_dir, prefix_name="print_page", dpi=300)
+            if png_list:
+                if sys.platform != "win32":
+                    w_temp_dir = subprocess.run(
+                        ["wslpath", "-w", temp_dir],
+                        capture_output=True, text=True, check=True
+                    ).stdout.strip()
+                else:
+                    w_temp_dir = temp_dir
 
                 ps_print_script = f'''
                 Add-Type -AssemblyName System.Drawing
@@ -98,7 +100,7 @@ def send_to_printer(pdf_path, printer_name):
                 $doc.PrinterSettings.PrinterName = "{printer_name}"
                 $doc.DefaultPageSettings.Margins = New-Object System.Drawing.Printing.Margins(0, 0, 0, 0)
                 
-                $files = Get-ChildItem -Path "{w_temp_dir}" -Filter "page_*.png" | Sort-Object Name
+                $files = Get-ChildItem -Path "{w_temp_dir}" -Filter "print_page-*.png" | Sort-Object Name
                 $i = 0
 
                 $doc.add_PrintPage({{
@@ -116,32 +118,34 @@ def send_to_printer(pdf_path, printer_name):
 
                 $doc.Print()
                 '''
+                ps_bin = "powershell.exe" if shutil.which("powershell.exe") else "powershell"
                 ps_res = subprocess.run(
-                    ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_print_script],
+                    [ps_bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", ps_print_script],
                     capture_output=True, text=True, timeout=60
                 )
                 if ps_res.returncode == 0:
                     return True, "ส่งพิมพ์สำเร็จ"
                 else:
-                    return False, ps_res.stderr or "เกิดข้อผิดพลาดในการส่งพิมพ์ผ่าน PowerShell"
-            finally:
-                shutil.rmtree(temp_dir, ignore_errors=True)
+                    return False, ps_res.stderr or "เกิดข้อผิดพลาดในการส่งพิมพ์ผ่าน Windows Print"
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
 
-        # วิธีที่ 2: สำรอง ถ้าไม่มี gs ให้ใช้คำสั่ง Start-Process PrintTo บน Windows
+        # Fallback ถ้าแปลงภาพไม่ได้ ให้ใช้ PrintTo
         escaped_pdf = w_path.replace("'", "''")
         escaped_printer = printer_name.replace("'", "''")
         fallback_script = f'''
         Start-Process -FilePath '{escaped_pdf}' -Verb PrintTo -ArgumentList '"{escaped_printer}"' -PassThru | Wait-Process -Timeout 10
         '''
+        ps_bin = "powershell.exe" if shutil.which("powershell.exe") else "powershell"
         res = subprocess.run(
-            ["powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", fallback_script],
+            [ps_bin, "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", fallback_script],
             capture_output=True, text=True, timeout=30
         )
         if res.returncode == 0:
             return True, "ส่งพิมพ์สำเร็จ"
         return False, res.stderr or "เกิดข้อผิดพลาดในการสั่งพิมพ์"
 
-    # สำหรับ Native Linux
+    # 2. Native Linux CUPS
     if shutil.which("lp"):
         res = subprocess.run(["lp", "-d", printer_name, pdf_path], capture_output=True, text=True, timeout=30)
         if res.returncode == 0:
